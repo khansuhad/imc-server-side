@@ -23,6 +23,7 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
+    // addmission student api start
     const admissionCollection = client.db("imcDB").collection("admissions");
     app.post("/admissionStudents", async (req, res) => {
         const formInfo = req.body;
@@ -65,6 +66,19 @@ async function run() {
         const result = await admissionCollection.updateOne(cursor, updatedDoc);
         res.send(result);
       });
+    // addmission student api end
+    // addpayment api start
+    const paymentCollection = client.db("imcDB").collection("payments");
+    app.post("/addpayment", async (req, res) => {
+      const formInfo = req.body;
+      const result = await paymentCollection.insertOne(formInfo);
+      res.send(result);
+    });
+    app.get("/addpayment", async (req, res) => {
+      const result = await paymentCollection.find().toArray();
+      res.send(result)
+    })
+    // addpayment api end
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
