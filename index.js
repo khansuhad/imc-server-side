@@ -79,7 +79,16 @@ async function run() {
     }
     const result = await admissionCollection.find(query).toArray();
     res.send(result)
-
+  })
+    app.get("/studentClassFilter", async (req, res) => {
+      const filter = req.query ;
+      console.log(filter);
+    const query = {
+      studentClass : {$regex : filter.studentClass }
+    }
+    const result = await admissionCollection.find(query).toArray();
+    res.send(result)
+    
       
     })
     // all student api end
