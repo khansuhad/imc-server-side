@@ -67,6 +67,20 @@ async function run() {
         res.send(result);
       });
     // addmission student api end
+    // all student api start
+    const allStudentCollection = client.db("imcDB").collection("allStudent");
+    app.get("/studentFilter", async (req, res) => {
+      const filter = req.query ;
+      console.log(filter);
+      const query = {
+        id :{$regex : filter.id } ,
+        name : {$regex : filter.name , $options : 'i'},
+        studentClass : {$regex : filter.studentClass }
+      }
+      const result = await admissionCollection.find(query).toArray();
+      res.send(result)
+    })
+    // all student api end
     // addpayment api start
     const paymentCollection = client.db("imcDB").collection("payments");
     app.post("/addpayment", async (req, res) => {
