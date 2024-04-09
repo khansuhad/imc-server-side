@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require("dotenv").config();
 const app = express();
-const port = process.env.PORT  ;
+const port = process.env.PORT || 5000 ;
 
 app.use(cors())
 app.use(express.json())
@@ -23,6 +23,24 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
+    // create test api start
+    const createTestCollection = client.db("imcDB").collection("createtests");
+    app.post("/createTests", async (req, res) => {
+      const formInfo = req.body;
+      const result = await createTestCollection.insertOne(formInfo);
+      res.send(result);
+    });
+    app.get("/createTests", async (req, res) => {
+      const result = await createTestCollection.find().toArray();
+      res.send(result)
+    })
+    app.get("/createTests/:id", async (req, res) => {
+      const query = req.params.id ;
+      const filter = { _id: new ObjectId(query) }
+      const result = await createTestCollection.findOne(filter)
+      res.send(result)
+    })
+    // create test api end
     // addmission student api start
     const admissionCollection = client.db("imcDB").collection("admissions");
     app.post("/admissionStudents", async (req, res) => {
