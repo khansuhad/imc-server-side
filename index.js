@@ -17,7 +17,16 @@ const moment = require("moment-timezone");
 //   },
 //   credentials: true ,
 // }));
-app.use(cors())
+app.use(cors(
+  {
+    origin : [ 
+      'http://localhost:5173' ,
+      'https://www.infinitymathcenter.com'
+       ],
+    credentials: true
+  },
+
+))
 app.use(express.json())
 
 const { MongoClient, ServerApiVersion , ObjectId } = require('mongodb');
@@ -262,6 +271,7 @@ async function run() {
               batch: batch?.batchTitle,
               completedInfo: "running student"
             });
+
             return {
               ...batch,
               totalStudents,
@@ -275,6 +285,34 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch admissions" });
       }
     });
+    app.get("/class-students", async (req, res) => {
+      const { studentClass } = req.query;
+    
+      try {
+        // Step 1: Find all batches with the specified class
+        const batchResult = await batchCollection
+          .find({ studentClass: studentClass })
+          .toArray();
+    
+        // Step 2: Extract batch titles from the found batches
+        const batchTitles = batchResult.map(batch => batch.batchTitle);
+    
+        // Step 3: Find all students whose batch is in the list of batch titles
+        const students = await admissionCollection
+          .find({
+            batch: { $in: batchTitles }
+          })
+          .toArray();
+    
+   
+    
+        res.send( students );
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: "Failed to fetch student data" });
+      }
+    });
+    
     
     app.get("/filter-batches", async (req, res) => {
       const { name } = req.query; // Capture 'name' from query parameters
@@ -347,7 +385,7 @@ async function run() {
         if (result.modifiedCount > 0) {
           // Get the updated batch details
           const updatedBatch = await batchCollection.findOne(filter);
-          const updatedFee = updatedBatch.batchMonthlyFee;
+          const updatedFee = Number(updatedBatch.batchMonthlyFee);
           const batchTitle = updatedBatch.batchTitle;
     
           // Get current month in the format 'Feb 2025'
@@ -361,22 +399,61 @@ async function run() {
           const students = await admissionCollection.find({ batch: batchTitle }).toArray();
     
           // Update duesBatchMonthlyFee for the current month
-          const updatePromises = students.map((student) => {
-            const updatedDues = student.duesBatchMonthlyFee.map((dues) => {
-              if (dues.month === currentMonth) {
-                return {
-                  ...dues,
-                  fee: updatedFee, // Update the fee for the current month
-                };
-              }
-              return dues;
+          const updatePromises = students.map(async (student) => {
+
+            const checkFeesReceive = student?.feesReceivedBatchMonthlyFee?.find(item => item?.month === currentMonth)  ;
+            const checkDuesMonth = student?.duesBatchMonthlyFee?.find(item => item?.month === currentMonth)  ;
+            if (updatedFee !== checkDuesMonth?.fee) {
+
+            if(updatedFee <= 0){
+              console.log("ok 1");
+              const updatedDuesMonth = student?.duesBatchMonthlyFee.filter(item => item.month !== currentMonth)
+              await admissionCollection.updateOne({ _id: new ObjectId(student?._id) }, {
+                $set: {
+                  duesBatchMonthlyFee: updatedDuesMonth
+                }
             });
+             
+            }
+            else{
+
+              if (updatedFee > 0 && ( !checkFeesReceive && !checkDuesMonth)) {
+                let updatedDuesMonth = student?.duesBatchMonthlyFee || []
+                  updatedDuesMonth.push({month :currentMonth , fee : Number(updatedFee) })
+                  console.log(updatedDuesMonth);
+                  await admissionCollection.updateOne({ _id: new ObjectId(student?._id) }, {
+                    $set: {
+                      duesBatchMonthlyFee: updatedDuesMonth
+                    }
+                });
+               
+              
+              }
+              else if( updatedFee > 0 && (!checkFeesReceive && checkDuesMonth)  ){
+                console.log("ok 2");
+                const updatedDuesMonth = student?.duesBatchMonthlyFee.map((item) => {
+                  if (item.month === currentMonth) {
+                    console.log(item.month);
+                      return {
+                          ...item,
+                          fee: Number(updatedFee), // Update fee with new studentMonthlyFee
+                      };
+                  }
+                  return item;
+              });
+                        // Apply the updated duesMonth
+                        await admissionCollection.updateOne({ _id: new ObjectId(student?._id) }, {
+                          $set: {
+                            duesBatchMonthlyFee: updatedDuesMonth
+                          }
+                      });
+              }
+              
+            }
+          
+      
     
-            // Update the student's dues in the database
-            return admissionCollection.updateOne(
-              { _id: student._id },
-              { $set: { duesBatchMonthlyFee: updatedDues } }
-            );
+          }
           });
     
           await Promise.all(updatePromises);
@@ -537,6 +614,12 @@ async function run() {
         const result = await admissionCollection.findOne(filter)
         res.send(result)
       })
+      app.get("/admissions-reg/:id", async (req, res) => {
+        const query = req.params.id ;
+        const filter = { registrationNo: query }
+        const result = await admissionCollection.findOne(filter)
+        res.send(result)
+      })
       app.delete("/admissions-delete/:id", async (req, res) => {
         const query = req.params.id ;
         const filter = { _id: new ObjectId(query) }
@@ -549,7 +632,7 @@ async function run() {
               
             },
           };
-        const result = await admissionCollection.updateOne(filter , updateDoc )
+        const result = await admissionCollection.deleteOne(filter )
         res.send(result)
       })
       app.patch('/admissions/:id', async (req, res) => {
@@ -594,10 +677,22 @@ async function run() {
         }
     
         // Check if studentMonthlyFee is changed
-        if (update.studentMonthlyFee && update.studentMonthlyFee !== student.studentMonthlyFee) {
+        if (update.studentMonthlyFee !== student.studentMonthlyFee) {
             // Update duesMonth for the current month
-            const updatedDuesMonth = student.duesMonth.map((item) => {
+          if(student.studentMonthlyFee <= 0 && update.studentMonthlyFee > 0){
+              let updatedDuesMonth = student.duesMonth || []
+              updatedDuesMonth.push({month :currentMonth , fee : Number(update.studentMonthlyFee) })
+              await admissionCollection.updateOne(filter, {
+                $set: {
+                    duesMonth: updatedDuesMonth
+                }
+            });
+          }
+          else{
+            if( update?.studentMonthlyFee > 0 ){
+              const updatedDuesMonth = student.duesMonth.map((item) => {
                 if (item.month === currentMonth) {
+                  console.log(item.month);
                     return {
                         ...item,
                         fee: Number(update.studentMonthlyFee), // Update fee with new studentMonthlyFee
@@ -605,13 +700,25 @@ async function run() {
                 }
                 return item;
             });
-    
-            // Apply the updated duesMonth
-            await admissionCollection.updateOne(filter, {
+                      // Apply the updated duesMonth
+                      await admissionCollection.updateOne(filter, {
+                        $set: {
+                            duesMonth: updatedDuesMonth
+                        }
+                    });
+            }
+            else {
+              const updatedDuesMonth = student.duesMonth.filter(item => item.month !== currentMonth)
+              await admissionCollection.updateOne(filter, {
                 $set: {
                     duesMonth: updatedDuesMonth
                 }
             });
+            }
+          }
+        
+    
+  
         }
     
         // Prepare the update document
@@ -692,6 +799,7 @@ async function run() {
       app.get("/admissions-update/reg-number-update", async (req, res) => {
         const {query,registrationNo} = req.query;
         console.log(query);
+
         const admissions = await admissionCollection.find().toArray();
         const findReg = admissions.find(admission => admission.registrationNo == registrationNo);
         if(findReg){
@@ -731,6 +839,15 @@ async function run() {
  res.send(findStudent)
       
       })
+//       app.get("/admissions-update/deleted-update-roll", async (req, res) => {
+
+   
+//         // Use findOne to directly query the student with matching registrationNo
+//         const findStudent = await admissionCollection.deleteMany({ completedInfo : "deleted" });
+        
+//  res.send(findStudent)
+      
+//       })
       app.get("/admissions-update/dues-month-update", async (req, res) => {
         try {
           const students = await admissionCollection.find().toArray();
@@ -738,17 +855,13 @@ async function run() {
           await Promise.all(
             students.map(async (student) => {
               // If student has duesMonth array
-              if (student.duesMonth && student.duesMonth.length > 0) {
-                // Update each month fee with studentMonthlyFee
-                const updatedDuesMonth = student.duesMonth.map((month) => ({
-                  ...month,
-                  fee: student.studentMonthlyFee,
-                }));
+              if (student.duesBatchMonthlyFee && student.duesBatchMonthlyFee.length > 0) {
+
       
                 // Update the database
                 await admissionCollection.updateOne(
                   { _id: student._id },
-                  { $set: { duesMonth: updatedDuesMonth } }
+                  { $set: { duesBatchMonthlyFee: [] } }
                 );
               }
             })
@@ -962,10 +1075,7 @@ app.get("/filter-payments", async (req, res) => {
     console.log(currentStudents);
     // Perform data transformation or join operation
     const transformedData = fees?.map(fee => {
-      const studentInfo = currentStudents?.find(student => {
-        
-        console.log(student?.registrationNo, "dsfs",fee?.registrationNo);
-        student?.registrationNo === fee?.registrationNo});
+      const studentInfo = currentStudents?.find(student => student?.registrationNo === fee?.registrationNo);
    
       if (studentInfo) {
         const { _id,registrationNo, ...std } = studentInfo; // Exclude `_id` field from the student info
@@ -1009,9 +1119,10 @@ app.get("/filter-payments", async (req, res) => {
 });
 app.post("/payment", async (req, res) => {
   const formInfo = req.body;
+  console.log(formInfo);
   const registrationNo = formInfo?.registrationNo;
-  const months = formInfo?.duesMonth; // Array of objects like [{ month: "January", fee: 100 }, ...]
-  const monthlyFees = formInfo?.duesBatchMonthlyFee; // Array of objects like [{ month: "January", fee: 100 }, ...]
+  const months = formInfo?.duesMonthPayment; // Array of objects like [{ month: "January", fee: 100 }, ...]
+  const monthlyFees = formInfo?.duesBatchMonthlyFeePayment; // Array of objects like [{ month: "January", fee: 100 }, ...]
 console.log(formInfo);
   try {
     // Update the admission collection
@@ -1038,9 +1149,10 @@ console.log(formInfo);
       const id = req.params.id
       const searchQuery = {_id : new ObjectId(id)}
       const transection = await paymentCollection.findOne(searchQuery)
+      console.log(transection);
       const registrationNo = transection?.registrationNo
-      const months = transection?.duesMonth 
-      const monthlyFees = transection?.duesMonthlyFee;
+      const months = transection?.duesMonthPayment 
+      const monthlyFees = transection?.duesBatchMonthlyFeePayment;
       const updateResult = await admissionCollection.updateOne(
         { registrationNo: registrationNo }, // Match student by registration number
         {
